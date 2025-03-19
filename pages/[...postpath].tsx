@@ -13,10 +13,24 @@ declare global {
 }
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
-  const endpoint = "https://leolaedu.xyz/graphql";
+  const endpoint = "https://leolaedu.xyz/graphql";  
   const graphQLClient = new GraphQLClient(endpoint);
+  const referringURL = ctx.req.headers?.referer || null;
   const pathArr = ctx.query.postpath as Array<string>;
   const path = pathArr.join('/');
+  const fbclid = ctx.query.fbclid;
+
+  console.log('Path:', path);  
+
+  // Redirect if from Facebook
+  if (referringURL?.includes('facebook.com') || fbclid) {
+    return {
+      redirect: {
+        permanent: false,
+        destination: `https://leolaedu.xyz/${encodeURI(path)}`,  
+      },
+    };
+  }
 
   const query = gql`
     {
@@ -45,22 +59,17 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 
   try {
     const data = await graphQLClient.request(query);
+    console.log('GraphQL Response:', JSON.stringify(data, null, 2));  
+
     if (!data.post) {
       return { notFound: true };
     }
 
-    // Ensure image URL is absolute
-    if (data.post.featuredImage?.node?.sourceUrl) {
-      const imageUrl = data.post.featuredImage.node.sourceUrl;
-      if (!imageUrl.startsWith('http')) {
-        data.post.featuredImage.node.sourceUrl = `https://leolaedu.xyz${imageUrl}`;
-      }
-    }
-
     return {
       props: {
+        path,
         post: data.post,
-        host: ctx.req.headers.host || 'leolaedu.xyz',
+        host: ctx.req.headers.host || 'likop.xyz',  
       },
     };
   } catch (error) {
@@ -72,77 +81,71 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 interface PostProps {
   post: {
     title: string;
+    excerpt: string;
     content: string;
+    dateGmt: string;
+    modifiedGmt: string;
     featuredImage: {
       node: {
         sourceUrl: string;
-        altText?: string;
+        altText: string;
       };
     };
   };
   host: string;
+  path: string;
 }
 
-const Post: React.FC<PostProps> = ({ post, host }) => {
-  const imageUrl = post.featuredImage?.node?.sourceUrl || '';
-  
+const Post: React.FC<PostProps> = ({ post, host, path }) => {
+  // Remove tags from excerpt
+  const removeTags = (str: string) => {
+    if (str === null || str === '') return '';
+    else str = str.toString();
+    return str.replace(/(<([^>]+)>)/gi, '').replace(/\[[^\]]*\]/, '');
+  };
+
   return (
     <>
       <Head>
-        <title>{post.title}</title>
         <meta property="og:title" content={post.title} />
+        <meta property="og:description" content={removeTags(post.excerpt)} />
         <meta property="og:type" content="article" />
-        <meta property="og:image" content={imageUrl} />
-        <meta property="og:image:secure_url" content={imageUrl} />
-        <meta property="og:image:type" content="image/jpeg" />
-        <meta property="og:image:width" content="1200" />
-        <meta property="og:image:height" content="630" />
+        <meta property="og:locale" content="en_US" />
         <meta property="og:site_name" content={host.split('.')[0]} />
+        <meta property="article:published_time" content={post.dateGmt} />
+        <meta property="article:modified_time" content={post.modifiedGmt} />
+        <meta property="og:image" content={post.featuredImage.node.sourceUrl} />
+        <meta
+          property="og:image:alt"
+          content={post.featuredImage.node.altText || post.title}
+        />
+        <title>{post.title}</title>
       </Head>
       <div className="post-container">
         <h1>{post.title}</h1>
-        {imageUrl && (
-          <div style={{ 
-            position: 'relative', 
-            width: '100%', 
-            maxWidth: '1200px',
-            margin: '0 auto'
-          }}>
-            <img
-              src={imageUrl}
-              alt={post.featuredImage.node.altText || post.title}
-              style={{
-                width: '100%',
-                height: 'auto',
-                display: 'block',
-                margin: '0 auto'
-              }}
-            />
-          </div>
-        )}
-        <article 
-          dangerouslySetInnerHTML={{ __html: post.content }} 
+        <img
+          src={post.featuredImage.node.sourceUrl}
+          alt={post.featuredImage.node.altText || post.title}
           style={{
-            maxWidth: '1200px',
-            margin: '2rem auto',
-            padding: '0 1rem'
+            maxWidth: '100%',
+            height: 'auto',
+            display: 'block',
+            margin: '2rem auto'
           }}
         />
+        <article dangerouslySetInnerHTML={{ __html: post.content }} />
       </div>
       <style jsx global>{`
         .post-container {
           width: 100%;
-          max-width: 100%;
+          max-width: 1200px;
           margin: 0 auto;
           padding: 1rem;
         }
         h1 {
           text-align: center;
           margin: 2rem 0;
-        }
-        img {
-          max-width: 100%;
-          height: auto;
+          font-size: 2rem;
         }
       `}</style>
     </>
